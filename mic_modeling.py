@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from numpy.polynomial.legendre import leggauss
+from scipy import signal
+from amp_modeling import calculate_amplifier_tf
 
 # === PARAMETERS (copied / extended) ===
 L   = 3e-3          # beam length [m]
@@ -65,17 +67,20 @@ for i in range(n_modes):
 # === 4.  Piezoelectric coupling vector Λ (charge per unit generalized curvature q_i) ===
 z_eff = h_s/2 + t_p/2    # distance from neutral axis to piezo centre
 def lambda_integrand(i):
-    return lambda x: 2 * d31 * E_p * b(x) * z_eff * d2phi_list[i](x)
+    return lambda x: d31 * E_p * b(x) * z_eff * d2phi_list[i](x)
 
 Lambda = np.array([integrate(lambda_integrand(i)) for i in range(n_modes)]).reshape((1,n_modes))  # row vector
 
 # === 5.  Frequency sweep ===
-f_Hz = np.linspace(100, 10e3, 3000)
+f_Hz = np.logspace(0, 4, 1000)
 w = 2*np.pi*f_Hz
 Q_over_P = np.zeros_like(w, dtype=complex)   # charge per acoustic pressure
 U_over_P = np.zeros_like(w, dtype=complex)   # tip displacement for reference
 U_over_P_unloaded = np.zeros_like(w, dtype=complex)   # tip displacement for reference
 p_vec = np.array([phi(L) for phi in phi_list]).reshape((n_modes,1))
+
+# Get amplifier transfer function
+H_amp, mag_amp, phase_amp = calculate_amplifier_tf(f_Hz)
 
 for k, omega in enumerate(w):
     D = K - omega**2 * M
@@ -89,22 +94,57 @@ for k, omega in enumerate(w):
     Q_over_P[k] = Lambda @ q                        # scalar
     U_over_P_unloaded[k] = A_tm/Z_msd
 
-# === 6.  Plot charge FRF ===
+# Calculate overall pressure-to-voltage response
+V_over_P = Q_over_P * H_amp
+
+# Print midband gains
+mid_idx = np.argmin(np.abs(f_Hz - 1000))   # ~1 kHz
+print("\nMidband gains:")
+print(f"Pressure to Charge: {np.abs(Q_over_P[mid_idx])*1e12:.2e} fC/Pa")
+print(f"Amplifier: {np.abs(H_amp[mid_idx]):.2e} V/C")
+print(f"Overall Pressure to Voltage: {np.abs(V_over_P[mid_idx]):.2e} V/Pa")
+
+# === 6.  Plot responses ===
 plt.figure()
+plt.semilogx(f_Hz, mag_amp, label='|H_amp|')
+plt.xlabel('Frequency [Hz]')
+plt.ylabel('Magnitude')
+plt.title('Amplifier Transfer Function')
+plt.grid(True)
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12, 8))
+
+# Pressure to Charge
+plt.subplot(2, 1, 1)
 plt.loglog(f_Hz, np.abs(Q_over_P)*1e12, label='|Q/P|')
 plt.xlabel('Frequency [Hz]')
 plt.ylabel('Magnitude [fC / Pa]')
-plt.title('Charge output of bimorph vs frequency')
+plt.title('Pressure to Charge Response')
 plt.grid(True)
+plt.legend()
+
+# Pressure to Voltage
+plt.subplot(2, 1, 2)
+plt.loglog(f_Hz, np.abs(V_over_P), label='|V/P|')
+plt.xlabel('Frequency [Hz]')
+plt.ylabel('Magnitude [V / Pa]')
+plt.title('Overall Pressure to Voltage Response')
+plt.grid(True)
+plt.legend()
+
+plt.tight_layout()
 plt.show()
 
 # also plot displacement if desired
 plt.figure()
-plt.loglog(f_Hz, np.abs(U_over_P)*1e9, label='|U/P| [nm/Pa]')
-plt.loglog(f_Hz, np.abs(U_over_P_unloaded)*1e9, label='|U/P| [nm/Pa]')
+plt.loglog(f_Hz, np.abs(U_over_P_unloaded)*1e9, label='unloaded')
+plt.loglog(f_Hz, np.abs(U_over_P)*1e9, label='loaded')
 plt.xlim(100, 10e3)
 plt.ylim(1e-1, 1e3)
 plt.xlabel('Frequency [Hz]')
 plt.ylabel('Tip Displacement [nm/Pa]')
 plt.grid(True)
+plt.legend()
 plt.show()
