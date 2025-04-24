@@ -12,18 +12,19 @@ c_lump = 0.1        # [N·s/m]
 A_tm = 65e-6        # tymp membrane area [m^2]
 
 # Piezo-layer properties (PVDF example)
-t_p = 25e-6         # piezo thickness [m]
+t_p = 50e-6         # piezo thickness [m]
 E_p = 3e9           # piezo Young's modulus [Pa]
 d31 = -23e-12       # piezoelectric coeff [C/N]  (PVDF negative)
 
 # Simulation parameters
-n_modes = 5         # Ritz functions (cantilever modes)
+n_modes = 10         # Ritz functions (cantilever modes)
 nq = 12             # quadrature points 
 
-
 # Piezostack parameters
-# K_p = 1e9          # blocked stiffness of the stack  [N/m]
-# delta_f = d33 * n_layers * V_drive   # free extension [m]
+K_p = 1e8          # blocked stiffness of the stack  [N/m]
+d33 = 3e-8         # piezoelectric coeff [m/V]
+V_drive = 1
+delta_f = d33 * V_drive   # free extension [m]
 
 # # inside the frequency loop ---------------------------
 # D = K - w**2 * M

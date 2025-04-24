@@ -9,7 +9,9 @@ from parameters import *
 def generate_cantilever_modes(n, L):
     betaL_roots = [1.8751040687119611, 4.694091132974174,
                    7.854757438237612, 10.995540734875466,
-                   14.13716839104647]  # extend if needed
+                   14.13716839104647, 17.27875953208823,
+                   20.42035224562606, 23.56194490184045,
+                   26.70353755550819, 29.84513020910325]  # first 10 roots
     if n > len(betaL_roots):
         raise ValueError("extend betaL list")
     phi, d2phi = [], []
@@ -82,7 +84,7 @@ def run_simulation():
     # Print midband gains
     mid_idx = np.argmin(np.abs(f_Hz - 1000))   # ~1 kHz
     print("\nMidband gains:")
-    print(f"Pressure to Charge: {np.abs(Q_over_P[mid_idx])*1e12:.2e} fC/Pa")
+    print(f"Pressure to Charge: {np.abs(Q_over_P[mid_idx])*1e12:.2e} pC/Pa")
     print(f"Amplifier: {np.abs(H_amp[mid_idx]):.2e} V/C")
     print(f"Overall Pressure to Voltage: {np.abs(V_over_P[mid_idx]):.2e} V/Pa")
 
@@ -156,28 +158,43 @@ def run_simulation_for_length(L_value):
     Lambda = np.array([integrate(lambda_integrand(i)) for i in range(n_modes)]).reshape((1,n_modes))
 
     # === 5.  Frequency sweep ===
-    f_Hz = np.logspace(0, 4, 1000)
+    f_Hz = np.logspace(0, 5, 1000)
     w = 2*np.pi*f_Hz
     Q_over_P = np.zeros_like(w, dtype=complex)
+    Q_over_P_piezostack = np.zeros_like(w, dtype=complex)
     U_over_P = np.zeros_like(w, dtype=complex)
     U_over_P_unloaded = np.zeros_like(w, dtype=complex)
+    U_piezostack = np.zeros_like(w, dtype=complex)
     p_vec = np.array([phi(L_value) for phi in phi_list]).reshape((n_modes,1))
 
     H_amp, mag_amp, phase_amp = calculate_amplifier_tf(f_Hz)
 
     for k, omega in enumerate(w):
+        # # inside the frequency loop ---------------------------
         D = K - omega**2 * M
         invD = np.linalg.inv(D)
         k_b  = 1.0 / (p_vec.T @ invD @ p_vec)
         Z_msd = -omega**2 * m_lump - 1j*omega*c_lump + k_lump
         den   = k_b + Z_msd
+
+        # tip displacement with piezostack
+        U_piezostack[k] = (K_p * delta_f) / (k_b + K_p)
+        # charge with piezostack
+        q_piezostack = (invD @ p_vec) * (k_b * U_piezostack[k])
+        Q_over_P_piezostack[k] = Lambda @ q_piezostack
+        
+        # tip displacement with umbo
         U_over_P[k] = A_tm / den
+
+        # umbo displacement no loading
+        U_over_P_unloaded[k] = A_tm/Z_msd
+        
+        # charge calculation
         q = (invD @ p_vec) * (k_b * U_over_P[k])
         Q_over_P[k] = Lambda @ q
-        U_over_P_unloaded[k] = A_tm/Z_msd
 
     V_over_P = Q_over_P * H_amp
-    return f_Hz, np.abs(V_over_P)
+    return f_Hz, np.abs(V_over_P), np.abs(Q_over_P_piezostack)
 
 def find_bandwidth(freq, response, ref_idx):
     """Find the -3dB bandwidth around the reference gain"""
@@ -199,9 +216,9 @@ def find_bandwidth(freq, response, ref_idx):
     
     return lower_freq, upper_freq, upper_freq - lower_freq
 
-def plot_length_sweep_results(f_Hz, lengths, responses, midband_gains, bandwidths):
+def plot_length_sweep_results(f_Hz, lengths, responses, midband_gains, bandwidths, piezostack_responses):
     """Plot waterfall and analysis plots"""
-    # Waterfall plot
+    # Waterfall plot for pressure to voltage
     plt.figure(figsize=(12, 8))
     for i, (L, response) in enumerate(zip(lengths, responses)):
         # Plot the frequency response
@@ -221,6 +238,18 @@ def plot_length_sweep_results(f_Hz, lengths, responses, midband_gains, bandwidth
     plt.xlabel('Frequency [Hz]')
     plt.ylabel('Magnitude [V/Pa]')
     plt.title('Pressure to Voltage Response for Different Beam Lengths\n(Black dots: midband gain, Red crosses: -3dB points)')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+    # Waterfall plot for piezostack response
+    plt.figure(figsize=(12, 8))
+    for i, (L, response) in enumerate(zip(lengths, piezostack_responses)):
+        plt.loglog(f_Hz, response*1e15/(delta_f*1e9), label=f'L={L*1e3:.1f}mm')
+    
+    plt.xlabel('Frequency [Hz]')
+    plt.ylabel('Magnitude [fC/nm]')
+    plt.title('Piezostack Displacement Response')
     plt.grid(True)
     plt.legend()
     plt.show()
@@ -248,21 +277,23 @@ def plot_length_sweep_results(f_Hz, lengths, responses, midband_gains, bandwidth
 def main():
     # Run original simulation with default parameters
     print("\nRunning simulation with default parameters:")
-    results = run_simulation()
-    plot_results(*results)
+    # results = run_simulation()
+    # plot_results(*results)
     
     # Run length sweep analysis
     print("\nRunning length sweep analysis:")
     # Length sweep parameters
-    lengths = np.linspace(1.5e-3, 6e-3, 20)  # 10 points between 1.5mm and 6mm
+    lengths = np.linspace(2e-3, 5e-3, 10)  # 25 points between 2mm and 5mm
     responses = []
+    piezostack_responses = []
     midband_gains = []
     bandwidths = []
 
     # Run simulation for each length
     for L_value in lengths:
-        f_Hz, response = run_simulation_for_length(L_value)
+        f_Hz, response, response_piezostack = run_simulation_for_length(L_value)
         responses.append(response)
+        piezostack_responses.append(response_piezostack)
         
         # Find midband gain (around 1kHz)
         mid_idx = np.argmin(np.abs(f_Hz - 1000))
@@ -276,7 +307,7 @@ def main():
         print(f"Length: {L_value*1e3:.1f}mm, Midband Gain: {midband_gain:.2e} V/Pa, Bandwidth: {bandwidth:.0f} Hz")
 
     # Plot length sweep results
-    plot_length_sweep_results(f_Hz, lengths, responses, midband_gains, bandwidths)
+    plot_length_sweep_results(f_Hz, lengths, responses, midband_gains, bandwidths, piezostack_responses)
 
 if __name__ == "__main__":
     main()
